@@ -24,12 +24,13 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.11.0"),
+        .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", .branch("main")),
     ],
     targets: [
         .target(name: "NIOHTTP2Server",
-            dependencies: ["NIOHTTP2"]),
+            dependencies: ["NIOHTTP2", "Lifecycle"]),
         .target(name: "NIOHTTP2PerformanceTester",
-                dependencies: ["NIOHTTP2"]),
+            dependencies: ["NIOHTTP2"]),
         .target(name: "NIOHTTP2",
             dependencies: ["NIO", "NIOHTTP1", "NIOTLS", "NIOHPACK", "NIOConcurrencyHelpers"]),
         .target(name: "NIOHPACK",

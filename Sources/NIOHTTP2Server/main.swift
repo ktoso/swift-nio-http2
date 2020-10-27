@@ -19,6 +19,7 @@
 import NIO
 import NIOHTTP1
 import NIOHTTP2
+import Lifecycle
 
 final class HTTP1TestServer: ChannelInboundHandler {
     public typealias InboundIn = HTTPServerRequestPart
@@ -52,13 +53,16 @@ final class HTTP1TestServer: ChannelInboundHandler {
 
 final class ErrorHandler: ChannelInboundHandler {
     typealias InboundIn = Never
-    
+
     func errorCaught(context: ChannelHandlerContext, error: Error) {
         print("Server received error: \(error)")
         context.close(promise: nil)
     }
 }
 
+
+// initialize the lifecycle container
+let lifecycle = ServiceLifecycle()
 
 // First argument is the program path
 let arguments = CommandLine.arguments
@@ -96,6 +100,10 @@ default:
 }
 
 let group = MultiThreadedEventLoopGroup(numberOfThreads: System.coreCount)
+lifecycle.registerShutdown(label: "event-loop",
+    .async(group.shutdownGracefully)
+)
+
 let bootstrap = ServerBootstrap(group: group)
     // Specify backlog and enable SO_REUSEADDR for the server itself
     .serverChannelOption(ChannelOptions.backlog, value: 256)
@@ -119,10 +127,6 @@ let bootstrap = ServerBootstrap(group: group)
     .childChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
     .childChannelOption(ChannelOptions.maxMessagesPerRead, value: 1)
 
-defer {
-    try! group.syncShutdownGracefully()
-}
-
 print("htdocs = \(htdocs)")
 
 let channel = try { () -> Channel in
@@ -136,7 +140,16 @@ let channel = try { () -> Channel in
 
 print("Server started and listening on \(channel.localAddress!), htdocs path \(htdocs)")
 
-// This will never unblock as we don't close the ServerChannel
-try channel.closeFuture.wait()
+lifecycle.start { error in
+    switch error {
+    case .some(let error):
+        print("Error: \(error)")
+    case .none:
+        print("Started successfully 🚀")
+    }
+}
+
+// This will block until lifecycle is shut down (i.e. by a CTRL-C on command line)
+lifecycle.wait()
 
 print("Server closed")
