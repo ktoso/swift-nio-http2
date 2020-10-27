@@ -20,6 +20,7 @@ import NIO
 import NIOHTTP1
 import NIOHTTP2
 import Lifecycle
+import LifecycleNIOCompat
 
 final class HTTP1TestServer: ChannelInboundHandler {
     public typealias InboundIn = HTTPServerRequestPart
@@ -104,48 +105,51 @@ lifecycle.registerShutdown(label: "event-loop",
     .async(group.shutdownGracefully)
 )
 
-let bootstrap = ServerBootstrap(group: group)
-    // Specify backlog and enable SO_REUSEADDR for the server itself
-    .serverChannelOption(ChannelOptions.backlog, value: 256)
-    .serverChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
+func bootstrapAndBind() -> EventLoopFuture<Channel> {
+    let bootstrap = ServerBootstrap(group: group)
+        // Specify backlog and enable SO_REUSEADDR for the server itself
+        .serverChannelOption(ChannelOptions.backlog, value: 256)
+        .serverChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
 
-    // Set the handlers that are applied to the accepted Channels
-    .childChannelInitializer { channel in
-        return channel.configureHTTP2Pipeline(mode: .server) { streamChannel -> EventLoopFuture<Void> in
-            return streamChannel.pipeline.addHandler(HTTP2FramePayloadToHTTP1ServerCodec()).flatMap { () -> EventLoopFuture<Void> in
-                streamChannel.pipeline.addHandler(HTTP1TestServer())
-            }.flatMap { () -> EventLoopFuture<Void> in
-                streamChannel.pipeline.addHandler(ErrorHandler())
+        // Set the handlers that are applied to the accepted Channels
+        .childChannelInitializer { channel in
+            return channel.configureHTTP2Pipeline(mode: .server) { streamChannel -> EventLoopFuture<Void> in
+                return streamChannel.pipeline.addHandler(HTTP2FramePayloadToHTTP1ServerCodec()).flatMap { () -> EventLoopFuture<Void> in
+                    streamChannel.pipeline.addHandler(HTTP1TestServer())
+                }.flatMap { () -> EventLoopFuture<Void> in
+                    streamChannel.pipeline.addHandler(ErrorHandler())
+                }
+            }.flatMap { (_: HTTP2StreamMultiplexer) in
+                return channel.pipeline.addHandler(ErrorHandler())
             }
-        }.flatMap { (_: HTTP2StreamMultiplexer) in
-            return channel.pipeline.addHandler(ErrorHandler())
         }
-    }
 
-    // Enable TCP_NODELAY and SO_REUSEADDR for the accepted Channels
-    .childChannelOption(ChannelOptions.socket(IPPROTO_TCP, TCP_NODELAY), value: 1)
-    .childChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
-    .childChannelOption(ChannelOptions.maxMessagesPerRead, value: 1)
+        // Enable TCP_NODELAY and SO_REUSEADDR for the accepted Channels
+        .childChannelOption(ChannelOptions.socket(IPPROTO_TCP, TCP_NODELAY), value: 1)
+        .childChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: 1)
+        .childChannelOption(ChannelOptions.maxMessagesPerRead, value: 1)
 
-print("htdocs = \(htdocs)")
-
-let channel = try { () -> Channel in
     switch bindTarget {
     case .ip(let host, let port):
-        return try bootstrap.bind(host: host, port: port).wait()
+        return bootstrap.bind(host: host, port: port)
     case .unixDomainSocket(let path):
-        return try bootstrap.bind(unixDomainSocketPath: path).wait()
+        return bootstrap.bind(unixDomainSocketPath: path)
     }
-    }()
 
-print("Server started and listening on \(channel.localAddress!), htdocs path \(htdocs)")
+}
+
+
+lifecycle.register(label: "bootstrap",
+    start: .eventLoopFuture { bootstrapAndBind().map { _ in () } }, // since expects ELF<Void>
+    shutdown: .none
+)
 
 lifecycle.start { error in
     switch error {
     case .some(let error):
         print("Error: \(error)")
     case .none:
-        print("Started successfully 🚀")
+        print("Server started and listening on \(bindTarget), htdocs path \(htdocs) 🚀")
     }
 }
 

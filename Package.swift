@@ -28,7 +28,7 @@ let package = Package(
     ],
     targets: [
         .target(name: "NIOHTTP2Server",
-            dependencies: ["NIOHTTP2", "Lifecycle"]),
+            dependencies: ["NIOHTTP2", "Lifecycle", "LifecycleNIOCompat"]),
         .target(name: "NIOHTTP2PerformanceTester",
             dependencies: ["NIOHTTP2"]),
         .target(name: "NIOHTTP2",
